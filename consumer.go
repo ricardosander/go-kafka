@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/IBM/sarama"
+	"github.com/elastic/go-elasticsearch/v8"
 	"log"
 	"time"
 )
@@ -79,14 +81,33 @@ type myConsumer struct{}
 func (myConsumer) Setup(_ sarama.ConsumerGroupSession) error   { return nil }
 func (myConsumer) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
 func (h myConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	config := elasticsearch.Config{}
+	client, err := elasticsearch.NewTypedClient(config)
+	if err != nil {
+		log.Printf("Fail to connecto to ES: %v", err)
+	}
+
 	for msg := range claim.Messages() {
 		var message Message
 		err := json.Unmarshal(msg.Value, &message)
 		if err != nil {
 			log.Printf("Fail unmarshaling message: %v\n", err)
+			continue
 		}
 		log.Printf("%+v", message)
 		log.Printf("Message topic:%q partition:%d offset:%d\n", msg.Topic, msg.Partition, msg.Offset)
+
+		res, err := client.Index("test").
+			Id(message.Id).
+			Document(message).
+			Do(context.TODO())
+
+		if err != nil {
+			log.Printf("Fail to insert document into ES: %v", err)
+			continue
+		}
+		fmt.Printf("Result: %+v\n", res.Result.String())
+
 		sess.MarkMessage(msg, "")
 	}
 	return nil
